@@ -25,6 +25,6 @@ Features:
    
 2. Modular Arithmetic: Combines user and computer inputs for uniform result distribution.
    
-3. Probability Table: Calculates and displays winning probabilities for different dice configurations.\
+3. Probability Table: Calculates and displays winning probabilities for different dice configurations.
    
 4. Error Handling: Manages invalid inputs, including malformed dice configurations and missing parameters.
