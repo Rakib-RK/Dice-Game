@@ -1,101 +1,152 @@
-import random
-from collections import Counter
+import secrets
+import hashlib
+from dataclasses import dataclass
+from typing import List, Tuple
 from itertools import product
+from collections import Counter
 
-def validate_dice(dice):
-    if not isinstance(dice, list) or len(dice) < 1:
-        raise ValueError("Dice must be a list with at least one die.")
-    for die in dice:
-        if not isinstance(die, list) or len(die) != 6 or not all(isinstance(x, int) for x in die):
-            raise ValueError("Each die must be a list of 6 integers.")
+try:
+  from tabulate import tabulate
+except ModuleNotFoundError:
+  print("The 'tabulate' library is not installed. Please install it using:")
+  print("  pip install tabulate")
+  print("Once installed, re-run your program.")
+  exit()
 
-def roll_dice(dice):
-    return [random.choice(die) for die in dice]
+class Die:
+    def __init__(self, sides: List[int]):
+        self.sides = sides
 
-def calculate_probabilities(dice):
-    outcomes, total_rolls = Counter(), 0
-    for roll in product(*dice):
-        outcomes[sum(roll)] += 1
-        total_rolls += 1
-    return {s: round(count / total_rolls, 4) for s, count in outcomes.items()}
+    def roll(self, key: bytes) -> int:
+        random_value = secrets.randbelow(len(self.sides))
+        hmac_value = hashlib.sha256(key + str(random_value).encode()).hexdigest()
+        print(f"I selected a random value in the range 0..{len(self.sides) - 1} (HMAC={hmac_value}).")
 
-def display_probabilities(probabilities):
-    print("\nHelp Table - Probabilities for 3 Dice (Sum -> Probability):")
-    for s, prob in sorted(probabilities.items()):
-        print(f"  {s} -> {prob}")
+        user_input = int(input("Add your number modulo " + str(len(self.sides)) + ": "))
+        result = (random_value + user_input) % len(self.sides)
+        
+        print(f"My number is {random_value} (KEY={key.hex()}).")
+        print(f"The result is {random_value} + {user_input} = {result} (mod {len(self.sides)}).")
+        return self.sides[result]
 
-def initialize_game(dice):
-    try:
-        validate_dice(dice)
-        return True
-    except ValueError as e:
-        print(f"Error: {e}")
-        return False
 
-def play_game(dice, rounds):
-    print(f"\n--- Starting the Dice Game ---\nDice configuration: {dice}")
-    if not initialize_game(dice):
-        return
-    probabilities = calculate_probabilities(dice[:3])
-    display_probabilities(probabilities)
-    total_user_score, total_computer_score = 0, 0
-    for round_num in range(1, rounds + 1):
-        print(f"\n--- Round {round_num} ---")
-        computer_roll, user_roll = roll_dice(dice), roll_dice(dice)
-        computer_sum, user_sum = sum(computer_roll), sum(user_roll)
-        print(f"Computer rolled: {computer_roll} (Sum: {computer_sum})")
-        print(f"User rolled: {user_roll} (Sum: {user_sum})")
-        if computer_sum > user_sum:
-            print("Computer wins this round!")
-            total_computer_score += 1
-        elif user_sum > computer_sum:
-            print("User wins this round!")
-            total_user_score += 1
-        else:
-            print("It's a tie!")
-    print(f"\nFinal Scores: User - {total_user_score}, Computer - {total_computer_score}")
-    if total_user_score > total_computer_score:
-        print("User wins the game!")
-    elif total_computer_score > total_user_score:
-        print("Computer wins the game!")
-    else:
-        print("The game ends in a tie!")
+class DiceConfigParser:
+    @staticmethod
+    def parse(dice_config_str: str) -> List[Die]:
+        dice_configs = []
+        for die_str in dice_config_str.split():
+            sides = [int(side) for side in die_str.split(",")]
+            dice_configs.append(Die(sides))
+        return dice_configs
+
+
+class ProbabilityCalculator:
+    @staticmethod
+    def calculate_win_probabilities(dice1: Die, dice2: Die) -> dict:
+        outcomes = Counter()
+        for roll1 in dice1.sides:
+            for roll2 in dice2.sides:
+                outcomes[roll1 > roll2] += 1
+        total_outcomes = sum(outcomes.values())
+        return {
+            "Dice 1 Wins": outcomes[True] / total_outcomes,
+            "Dice 2 Wins": outcomes[False] / total_outcomes,
+            "Tie": outcomes[roll1 == roll2] / total_outcomes,
+        }
+
+
+class HelpTableGenerator:
+    @staticmethod
+    def generate_help_table(dice_configs: List[Die]) -> None:
+        print("\nHelp Table: Win Probabilities for each dice pair.")
+        headers = [" "] + [f"Dice {i+1}" for i in range(len(dice_configs))]
+        table_data = []
+        for i, die1 in enumerate(dice_configs):
+            row = [f"Dice {i+1}"]
+            for j, die2 in enumerate(dice_configs):
+                if i == j:
+                    row.append("-")
+                else:
+                    probs = ProbabilityCalculator.calculate_win_probabilities(die1, die2)
+                    row.append(f"{probs['Dice 1 Wins']:.2f}")
+            table_data.append(row)
+        print(tabulate(table_data, headers=headers, tablefmt="grid"))
+
+
+class DiceGame:
+    def __init__(self, dice_configs: List[Die]) -> None:
+        self.dice_configs = dice_configs
+        self.user_score = 0
+        self.computer_score = 0
+
+    def play(self) -> None:
+        while True:
+            print("\nAvailable dice:")
+            for i, die in enumerate(self.dice_configs):
+                print(f"{i} - {die.sides}")
+
+            user_choice = input("Choose your dice (or X to exit, ? for help): ")
+            if user_choice == "X":
+                break
+            elif user_choice == "?":
+                HelpTableGenerator.generate_help_table(self.dice_configs)
+                continue
+            try:
+                user_choice = int(user_choice)
+            except ValueError:
+                print("Invalid selection. Please enter a number or 'X' or '?'.")
+                continue 
+
+            if user_choice not in range(len(self.dice_configs)):
+                print("Invalid selection. Try again.")
+                continue
+
+            computer_choice = self.determine_first_move()
+            user_die = self.dice_configs[user_choice]
+            computer_die = self.dice_configs[computer_choice]
+
+            print(f"\nYou chose dice {user_die.sides}. I chose dice {computer_die.sides}.")
+            user_throw = user_die.roll(secrets.token_bytes(32))
+            computer_throw = computer_die.roll(secrets.token_bytes(32))
+
+            if user_throw > computer_throw:
+                self.user_score += 1
+                print("You win!")
+            elif computer_throw > user_throw:
+                self.computer_score += 1
+                print("I win!")
+            else:
+                print("It's a tie!")
+
+            print(f"\nCurrent score: You - {self.user_score}, Computer - {self.computer_score}")
+
+    def determine_first_move(self) -> int:
+        computer_choice = secrets.randbelow(2)
+        key = secrets.token_bytes(32)
+        hmac_value = hashlib.sha256(key + str(computer_choice).encode()).hexdigest()
+        print(f"Let's determine who makes the first move.")
+        print(f"I selected a random value in the range 0..1 (HMAC={hmac_value}).")
+        while True:
+            user_guess = input("Try to guess my selection (0, 1, X to exit): ")
+            if user_guess == "X":
+                exit()
+            elif user_guess in ("0", "1"):
+                user_guess = int(user_guess)
+                break
+            else:
+                print("Invalid input. Please enter 0, 1, or X.")
+
+        print(f"My selection: {computer_choice} (KEY={key.hex()}).")
+        return computer_choice if computer_choice != user_guess else (computer_choice + 1) % 2
+
 
 if __name__ == "__main__":
-    print("Welcome to the Dice Game!")
-    standard_dice = [[1, 2, 3, 4, 5, 6]] * 4
-    custom_dice = [[2, 2, 4, 4, 9, 9], [1, 1, 6, 6, 8, 8], [3, 3, 5, 5, 7, 7]]
+    import sys
+    if len(sys.argv) < 2:
+        print("Usage: python dice_game.py <dice_config1> <dice_config2> ...")
+        print("Example: python dice_game.py 2,2,4,4,9,9 6,8,1,1,8,6 7,5,3,7,5,3")
+        sys.exit(1)
 
-    while True:
-        print("\nChoose your dice configuration:")
-        print("1. Play with 4 standard dice (1-6)")
-        print("2. Play with 3 custom dice")
-        print("3. Quit")
-        choice = input("Enter your choice (1, 2, or 3): ").strip()
-        
-        if choice == "1":
-            dice = standard_dice
-        elif choice == "2":
-            dice = custom_dice
-        elif choice == "3":
-            print("Thanks for playing!")
-            break
-        else:
-            print("Invalid input. Please choose 1, 2, or 3.")
-            continue
-        
-        try:
-            rounds = int(input("How many rounds would you like to play? ").strip())
-            if rounds < 1:
-                print("Please enter a positive number of rounds.")
-                continue
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-            continue
-
-        play_game(dice, rounds)
-        
-        replay = input("\nDo you want to play again? (yes or no): ").strip().lower()
-        if replay not in ["yes", "y"]:
-            print("Goodbye!")
-            break
+    dice_configs = DiceConfigParser.parse(" ".join(sys.argv[1:]))
+    game = DiceGame(dice_configs)
+    game.play()
